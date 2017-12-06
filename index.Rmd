@@ -1,0 +1,200 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Sabine SH"
+date: "6 Dezember 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+This is an R Markdown document showing the results of a prediction of how well people do a particular activity.
+
+The work was done as part of course "Practical Machine Learning". 
+
+As a basis, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants are used. The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
+
+
+
+## Reading the training data. Getting an overview of the data
+
+```{r 1_READING, echo=TRUE,cache=TRUE}
+
+traindata <- read.csv("C:/Sabine/Coursera Practical Maschine Learning/Assignment/pml-training.csv",header=TRUE)
+dim(traindata)
+summary(traindata)
+
+
+```
+
+The training data set consists of 19622 rows and 160 variables.  
+
+## Outcome Variable
+First of all, the variable classe is selected and analyzed.
+
+```{r 2_OUTCOME, echo=TRUE,cache=FALSE}
+outcome <- traindata[,"classe"]
+levels(outcome)
+
+        
+```
+
+There are 5 levels of outcome classes: "A","B","C","D","E" 
+
+## Getting Predictors
+
+My approach is to take only the values from the data set where there are values in the data set. First of all,I ignore 
+
+- timestamps
+- user information
+- calculated values such as averages or standard deviations, minimums etc
+
+As a second step more prdictors are ignored as a result of the thoroung data analysis. 
+
+
+```{r 3_PREDICTORS, echo=TRUE,cache=FALSE}
+# traindata2 <- traindata[,c("roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","gyros_belt_y","gyros_belt_z","accel_belt_x","accel_belt_y","accel_belt_z","magnet_belt_x","magnet_belt_y","magnet_belt_z","roll_arm","pitch_arm","yaw_arm","total_accel_arm","gyros_arm_x","gyros_arm_y","gyros_arm_z","accel_arm_x","accel_arm_y","accel_arm_z","magnet_arm_x","magnet_arm_y","magnet_arm_z","roll_dumbbell","pitch_dumbbell","yaw_dumbbell","gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z","accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z","magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z","roll_forearm","pitch_forearm","yaw_forearm","gyros_forearm_x","gyros_forearm_y","gyros_forearm_z","accel_forearm_x","accel_forearm_y","accel_forearm_z","magnet_forearm_x","magnet_forearm_y","magnet_forearm_z","classe")]
+
+
+traindata2 <- traindata[,c("roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","magnet_belt_y","magnet_dumbbell_x","pitch_forearm","magnet_forearm_x","classe")]
+
+head(traindata2)
+dim(traindata2)
+
+        
+```
+Originally, I had a selection of 51 possible variables as predictors. I finally reduced them to 9. 
+
+
+## Partitioning 
+Let's partition the training data set. 
+
+```{r 4_PARTITIONING , echo=TRUE,cache=FALSE}
+
+library(caret)
+
+inTrain <- createDataPartition(y=traindata2$classe, p=0.75, list=FALSE)
+training <- traindata2[inTrain,]
+testing <- traindata2[-inTrain,]
+
+
+        
+```
+
+## Printing some Boxplots and Feature Plots
+
+I would like to see if there are variables that seem to correlate to the "classe" value. With the help of boxplots and fieature plots I could get an idea which varibles contribute most to the classification "classe".
+
+Here are some boxplot of my chosen predictors. 
+
+```{r 5_BOXPLOTS, echo=TRUE,cache=FALSE}
+
+qplot(classe,roll_belt, data=training, fill=classe, geom=c("boxplot")) ##Y trennt A deutlich von B,C,D,E
+# qplot(classe,pitch_belt, data=training, fill=classe, geom=c("boxplot")) ## 
+# qplot(classe,yaw_belt, data=training, fill=classe, geom=c("boxplot")) ## 
+# qplot(classe,total_accel_belt, data=training, fill=classe, geom=c("boxplot")) ## Y A wird getrennt
+qplot(classe,gyros_belt_x, data=training, fill=classe, geom=c("boxplot")) ## Y A deutlich anders
+
+qplot(classe,magnet_belt_y, data=training, fill=classe, geom=c("boxplot")) ## YY D deutlich , E etwas abgesetzt
+
+qplot(classe,magnet_dumbbell_x, data=training, fill=classe, geom=c("boxplot")) ## Y B wird deutlich abgesetzt
+
+##qplot(classe,pitch_forearm, data=training, fill=classe, geom=c("boxplot")) ## Y C und D sind sehr unterschiedlich
+
+##qplot(classe,magnet_forearm_x, data=training, fill=classe, geom=c("boxplot")) ## Y D wird unterschieden
+
+
+##featurePlot(x=training[c("roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","magnet_belt_y","magnet_dumbbell_x","pitch_forearm","magnet_forearm_x")],
+##            y=training$classe,
+##            plot="pairs")
+```
+
+I have finally selected 9 predictors. As I have serious problems with performance, I was also hoping it will help.. 
+
+## Improving Performance by Parallel Processing
+
+```{r 6_PARALLEL, echo=TRUE,cache=FALSE}
+x <- training[,-10]
+y <- training[,10]
+
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+
+
+```
+
+The resampling method is changed from the default of bootstrapping to k-fold cross-validation. The impact of this change is to reduce the number of samples against which the random forest algorithm is run from 25 to 5, and to change each sample's composition from leave one out to randomly selected training folds. Note that within each sample, the trees are still calculated with the underlying random forest algorithm, as described by Leo Breiman. (Leonard Greski: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md)
+
+## Fitting the Model
+
+I have chosen the Random Forest Modeling as this is supposed to be one of the most accurate approach. It is widely used so it seems promising. 
+
+One of the key advantages of the caret package is its ability to estimate an out of sample error by aggregating the accuracy analysis across a series of training runs. This is because caret automates the process of fitting multiple versions of a given model by varying its parameters and/or folds within a resampling / cross-validation process. (Leonard Greski: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md)
+
+```{r 7_MODEL, echo=TRUE,cache=FALSE}
+
+set.seed(32242)
+modelFit <- train(x,y, method="rf", data=traindata2, trControl = fitControl)
+print(modelFit$finalModel)
+```
+
+The OOB estimate of the error rate is: 2.01%. The resulting oob error estimate is proven to be unbiased and valid as an out-of-sample error estimate. 
+
+There is no need to do cross-validation with the random forest model. Breiman (http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr) explains why:
+
+"In random forests, there is no need for cross-validation or a separate test set to get an unbiased estimate of the test set error. It is estimated internally, during the run, as follows:
+
+Each tree is constructed using a different bootstrap sample from the original data. About one-third of the cases are left out of the bootstrap sample and not used in the construction of the kth tree.
+
+Put each case left out in the construction of the kth tree down the kth tree to get a classification. In this way, a test set classification is obtained for each case in about one-third of the trees. At the end of the run, take j to be the class that got most of the votes every time case n was oob. The proportion of times that j is not equal to the true class of n averaged over all cases is the oob error estimate. This has proven to be unbiased in many tests."
+
+
+## Deregistering parallet processing cluster
+
+```{r 8_DEREGISTER, echo=TRUE,cache=FALSE}
+stopCluster(cluster)
+registerDoSEQ()
+
+
+
+```
+
+## Confusion Matrix
+
+```{r 9_MATRIX, echo=TRUE,cache=FALSE}
+
+confusionMatrix.train(modelFit)
+
+predict_data <- predict(modelFit, newdata=testing)
+
+table(predict_data,testing$classe)
+```
+
+The accuracy is about 98%. I feel confirmed that it is sufficient to concentrate on the most important predictors. 
+
+## Predicting with the testing data set
+
+
+```{r 10_PREDICT, echo=TRUE,cache=FALSE}
+testdata <- read.csv("C:/Sabine/Coursera Practical Maschine Learning/Assignment/pml-testing.csv",header=TRUE)
+dim(testdata)
+
+testdata2 <- testdata[,c("roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","magnet_belt_y","magnet_dumbbell_x","pitch_forearm","magnet_forearm_x")]
+
+predict_tdata <- predict(modelFit, newdata=testdata2)
+print(predict_tdata)
+
+```
+
+All predications turn out to be correct!
